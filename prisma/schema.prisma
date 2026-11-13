@@ -1,0 +1,104 @@
+// ====================================================================
+// FITMANAGER - ESQUEMA RELACIONAL PRISMA ORM (MOMENTO EVALUATIVO 3)
+// Motor: SQLite (Preservación estricta de continuidad relacional con M2)
+// ====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// --------------------------------------------------------------------
+// 1. MODELO: UsuarioAdmin (Seguridad, Hashing Bcrypt y Autenticación)
+// Almacena credenciales de administradores con contraseñas encriptadas.
+// NUNCA almacena texto plano (Paso 4 de la rúbrica).
+// --------------------------------------------------------------------
+model UsuarioAdmin {
+  id           Int      @id @default(autoincrement())
+  nombre       String
+  email        String   @unique
+  passwordHash String
+  rol          String   @default("ADMIN")
+  createdAt    DateTime @default(now())
+}
+
+// --------------------------------------------------------------------
+// 2. MODELO: Miembro
+// Registro maestro de los atletas y usuarios del gimnasio.
+// Resuelve el problema del Momento 2: los datos biométricos dinámicos
+// ya NO residen de manera estática aquí, sino en HistorialBiometrico (1:N).
+// --------------------------------------------------------------------
+model Miembro {
+  id                  Int                   @id @default(autoincrement())
+  nombre              String
+  email               String                @unique
+  telefono            String?
+  genero              String?               // 'M', 'F', 'Otro'
+  edad                Int
+  altura              Float                 // En metros (ej. 1.75)
+  nivelExperiencia    String                @default("Principiante") // 'Principiante', 'Intermedio', 'Avanzado'
+  activo              Boolean               @default(true)
+  fechaRegistro       DateTime              @default(now())
+  
+  // Relaciones 1:N
+  historialBiometrico HistorialBiometrico[]
+  sesiones            SesionEntrenamiento[]
+}
+
+// --------------------------------------------------------------------
+// 3. MODELO: HistorialBiometrico (SOLUCIÓN DEL DEFECTO DE ARQUITECTURA M2)
+// En el M2 los updates sobrescribían peso y grasa, perdiendo la serie temporal.
+// Ahora cada pesaje/medición se almacena con timestamp inmutable.
+// --------------------------------------------------------------------
+model HistorialBiometrico {
+  id            Int      @id @default(autoincrement())
+  miembroId     Int
+  peso          Float    // En kilogramos
+  grasaCorporal Float    // En porcentaje (ej. 18.5)
+  fechaRegistro DateTime @default(now())
+
+  miembro       Miembro  @relation(fields: [miembroId], references: [id], onDelete: Cascade)
+
+  @@index([miembroId, fechaRegistro])
+}
+
+// --------------------------------------------------------------------
+// 4. MODELO: TipoEntrenamiento (Catálogo Dinámico)
+// --------------------------------------------------------------------
+model TipoEntrenamiento {
+  id                 Int                   @id @default(autoincrement())
+  nombre             String                @unique
+  descripcion        String?
+  intensidadSugerida String                @default("Media") // 'Baja', 'Media', 'Alta', 'Extrema'
+  activo             Boolean               @default(true)
+  sesiones           SesionEntrenamiento[]
+}
+
+// --------------------------------------------------------------------
+// 5. MODELO: SesionEntrenamiento
+// Registra cada entrenamiento efectuado.
+// Aplica validaciones de seguridad fisiológica y sanitización de notas.
+// --------------------------------------------------------------------
+model SesionEntrenamiento {
+  id               Int               @id @default(autoincrement())
+  miembroId        Int
+  tipoId           Int
+  fechaSesion      DateTime          @default(now())
+  duracionMin      Int               // Minutos (1..360)
+  caloriasQuemadas Float             // Calorías quemadas
+  bpmReposo        Int               // Rango saludable en reposo (40..120)
+  bpmPromedio      Int?              // BPM promedio
+  bpmMaximo        Int?              // BPM máximo
+  notas            String?           // Sanitizado contra inyección XSS
+
+  miembro          Miembro           @relation(fields: [miembroId], references: [id], onDelete: Restrict)
+  tipo             TipoEntrenamiento @relation(fields: [tipoId], references: [id], onDelete: Restrict)
+
+  @@index([miembroId])
+  @@index([tipoId])
+  @@index([fechaSesion])
+}
